@@ -1,0 +1,56 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Reconocimiento de Señas en Tiempo Real</title>
+</head>
+<body>
+    <h1>Reconocimiento de Señas en Tiempo Real</h1>
+    <video id="video" width="640" height="480" autoplay></video>
+    <button onclick="capturar()">Detectar Seña</button>
+    <p id="resultado">Resultado: </p>
+
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        const video = document.getElementById('video');
+        const resultado = document.getElementById('resultado');
+
+        // Iniciar cámara
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => {
+                video.srcObject = stream;
+            })
+            .catch(error => {
+                console.error("No se pudo acceder a la cámara:", error);
+            });
+
+        function capturar() {
+            const canvas = document.getElementById('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            canvas.toBlob(blob => {
+                const formData = new FormData();
+                formData.append('image', blob, 'frame.jpg');
+
+                fetch('/predict', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    resultado.textContent = `Resultado: ${data.description}`;
+                })
+                .catch(err => {
+                    console.error('Error:', err);
+                    resultado.textContent = 'Error al detectar la seña.';
+                });
+            }, 'image/jpeg');
+        }
+    </script>
+</body>
+</html>
