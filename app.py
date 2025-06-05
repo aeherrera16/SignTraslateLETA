@@ -1,55 +1,63 @@
+# app.py
+# -*- coding: utf-8 -*-
+
 import cv2
 import numpy as np
 import mediapipe as mp
-from keras.models import load_model
+import pickle
+import time
+from tensorflow.keras.models import load_model
+from utils.landmark_extractor import extract_hand_landmarks
+from utils.text_to_speech import speak_text  # <-- ahora sí bien importado
 
-# Cargar el modelo
+# Cargar modelo y etiquetas
 model = load_model("sign_language_model_landmarks.h5")
-class_names = ["A", "B", "C", "D", "E"]  # Cambia según tus clases reales
+with open("labels.pkl", "rb") as f:
+    labels = pickle.load(f)
 
 # Inicializar MediaPipe
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.7)
+hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.5)
 mp_drawing = mp.solutions.drawing_utils
 
-# Captura desde la webcam
+# Iniciar cámara
 cap = cv2.VideoCapture(0)
+prev_prediction = ''
+last_spoken_time = 0  # Guarda el tiempo de la última vez que habló
+speak_interval = 0.3  # Segundos mínimos entre voces
 
-while cap.isOpened():
+while True:
     ret, frame = cap.read()
     if not ret:
         break
 
-    # Flip para vista espejo
-    frame = cv2.flip(frame, 1)
-    h, w, _ = frame.shape
-
-    # Convertir a RGB
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    result = hands.process(rgb)
+    image = cv2.flip(frame, 1)
+    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    result = hands.process(rgb_image)
 
     if result.multi_hand_landmarks:
         for hand_landmarks in result.multi_hand_landmarks:
-            # Dibujar puntos
-            mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+            mp_drawing.draw_landmarks(image, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+            landmarks = extract_hand_landmarks(hand_landmarks)
 
-            # Extraer coordenadas (x, y, z) de cada uno de los 21 puntos
-            data = []
-            for lm in hand_landmarks.landmark:
-                data.extend([lm.x, lm.y, lm.z])
+            if len(landmarks) == 63:
+                prediction = model.predict(np.array([landmarks]), verbose=0)
+                predicted_index = np.argmax(prediction)
+                predicted_label = labels[predicted_index]
 
-            if len(data) == 63:
-                prediction = model.predict(np.array([data]))  # (1, 63)
-                predicted_class = class_names[np.argmax(prediction)]
-                confidence = np.max(prediction)
+                cv2.putText(image, predicted_label, (10, 70),
+                            cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 3)
 
-                # Mostrar resultado
-                cv2.putText(frame, f'{predicted_class} ({confidence:.2f})', (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+                # Solo hablar si es una nueva predicción y pasó suficiente tiempo
+                current_time = time.time()
+                if predicted_label != prev_prediction and (current_time - last_spoken_time) > speak_interval:
+                    speak_text(predicted_label)
+                    prev_prediction = predicted_label
+                    last_spoken_time = current_time
 
-    cv2.imshow('Sign Detection - Option B', frame)
+    cv2.imshow("Sign Language Recognition", image)
 
-    if cv2.waitKey(1) & 0xFF == 27:  # ESC para salir
+    if cv2.waitKey(1) & 0xFF == 27:  # Esc para salir
         break
 
 cap.release()
